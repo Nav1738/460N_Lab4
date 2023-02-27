@@ -76,6 +76,19 @@ enum CS_BITS {
     DATA_SIZE,
     LSHF1,
 /* MODIFY: you have to add all your new control signals */
+    LD_SAVEDUSP,
+    LD_SAVEDSP,
+    SPMUX,
+    GATE_SP,
+    GATE_PSR,
+    PSRMUX,
+    LD_VECTOR,
+    GATE_VECTOR,
+    VECTORMUX,
+    LD_PRIV,
+    LD_EXC,
+    TABLE_MUX,
+    COND2,
     CONTROL_STORE_BITS
 } CS_BITS;
 
@@ -168,7 +181,9 @@ int INTV; /* Interrupt vector register */
 int EXCV; /* Exception vector register */
 int SSP; /* Initial value of system stack pointer */
 /* MODIFY: You may add system latches that are required by your implementation */
-
+int PSR;
+int INT;
+int EXC;
 } System_Latches;
 
 /* Data Structure for Latch */
@@ -589,10 +604,49 @@ void eval_micro_sequencer() {
    * Evaluate the address of the next state according to the 
    * micro sequencer logic. Latch the next microinstruction.
    */
+  int* curInst = CURRENT_LATCHES.MICROINSTRUCTION;
+  int nextStateNum = GetJ(curInst);
+  if(CURRENT_LATCHES.MICROINSTRUCTION[IRD]){
+    nextStateNum = ((CURRENT_LATCHES.IR >> 12)) & 0xF; // Get IR[15:12] to find which state to branch to
+    
+  }else{ // evaluate microsequencer gates
+    
+    
+    if(GetCOND(curInst) == 1){ // Cond0 on 
+        if(CURRENT_LATCHES.READY){
+            nextStateNum = GetJ(curInst) | 0x02; //J1
+        }
+    }else if(GetCOND(curInst) == 2){ // Cond1 on
+        if(CURRENT_LATCHES.BEN){
+            nextStateNum = GetJ(curInst) | 0x04; //J2
+        }
+    }else if(GetCOND(curInst) == 3){ //Both Cond0 and Cond1 on
+        if(CURRENT_LATCHES.IR & 0x0800){ //IR[11]
+            nextStateNum = GetJ(curInst) | 0x01; //J0
+        }
+    }else if(GetCOND(curInst) == 4){ // Cond2 on
+        if(CURRENT_LATCHES.PSR & 0x8000){ //PSR[15]
+            nextStateNum = GetJ(curInst) | 0x08; //J3
+        }
+    }else if(GetCOND(curInst) == 5){ //Cond 2 and Cond 0
+        if(CURRENT_LATCHES.INT){
+            NEXT_LATCHES.INT = 0;
+            nextStateNum = GetJ(curInst) | 0x10; //J4
+        }
+    }else if(GetCOND(curInst) == 6){ //Cond 2 and Cond 1
+        if(CURRENT_LATCHES.EXC){
+            nextStateNum = GetJ(curInst) | 0x20; //J5
+        }
+    }
+  }
+  NEXT_LATCHES.STATE_NUMBER = nextStateNum;
+  for(int i = 0; i < CONTROL_STORE_BITS; i++){ //35 bits in a microinstruction
+    NEXT_LATCHES.MICROINSTRUCTION[i] = CONTROL_STORE[NEXT_LATCHES.STATE_NUMBER][i]; //populate the microinstruction for the next cycle
+  }  
 
 }
 
-
+int numCycle = 0;
 void cycle_memory() {
  
   /* 
@@ -601,9 +655,195 @@ void cycle_memory() {
    * If fourth, we need to latch Ready bit at the end of 
    * cycle to prepare microsequencer for the fifth cycle.  
    */
+  int MIOEN = GetMIO_EN(CURRENT_LATCHES.MICROINSTRUCTION);
+  int READY = CURRENT_LATCHES.READY;
+  int RW = GetR_W(CURRENT_LATCHES.MICROINSTRUCTION);
+  int DATASIZE = GetDATA_SIZE(CURRENT_LATCHES.MICROINSTRUCTION);
 
+  if(MIOEN){ 
+    numCycle++;
+    if(READY && RW){ // R enables the memory to execute correctly and RW = 1 indicates that memory needs to be written to 
+        if(DATASIZE){ //If WORD
+            int byte0 = CURRENT_LATCHES.MDR & 0x00FF;
+            int byte1 = (CURRENT_LATCHES.MDR >> 8) & 0x00FF; 
+            MEMORY[((CURRENT_LATCHES.MAR)) >> 1][1] = byte1; 
+            MEMORY[((CURRENT_LATCHES.MAR)) >> 1][0] = byte0;
+        }
+        else{ //BYTE
+            if(CURRENT_LATCHES.MAR & 0x1){
+                MEMORY[(CURRENT_LATCHES.MAR) >> 1][CURRENT_LATCHES.MAR & 0x1] = ((CURRENT_LATCHES.MDR & 0xFF00) >> 8);
+            }else{
+                MEMORY[(CURRENT_LATCHES.MAR) >> 1][CURRENT_LATCHES.MAR & 0x1] = (CURRENT_LATCHES.MDR & 0xFF);
+            }
+            
+        }
+    }
+    if(numCycle == 4){
+        NEXT_LATCHES.READY = 1;
+    }
+    if(numCycle == 5){
+        NEXT_LATCHES.READY = 0;
+        numCycle = 0;
+    }
+  }
+  
 }
 
+int MARMUXGATE = 0;
+int GATEPC = 0;
+int GATEALU = 0;
+int GATESHF = 0;
+int GATEMDR = 0;
+
+int setALUGate(){
+  int SR2OUT;
+  int IR = CURRENT_LATCHES.IR;
+  int* curInst = CURRENT_LATCHES.MICROINSTRUCTION;
+  int SR1 = 0;
+  if(GetSR1MUX(curInst)){
+    SR1 = CURRENT_LATCHES.REGS[(IR >> 6) & 0x07];
+  }else{
+    SR1 = CURRENT_LATCHES.REGS[(IR >> 9) & 0x07];
+  }
+  if((IR >> 5) & 1){ //imm5
+    int sign = IR & 0x10;
+    if(sign){
+        SR2OUT = Low16bits(0xFFF0 | (IR & 0x001F)); 
+    }else{
+        SR2OUT = Low16bits(0x0000 | (IR & 0x001F));
+    }
+     
+  }else{
+    SR2OUT = CURRENT_LATCHES.REGS[(IR) & 0x7];
+  }
+
+  if(!GetALUK(curInst)){ //ADD
+    GATEALU = Low16bits(SR1 + SR2OUT);
+  }else if(GetALUK(curInst) == 1){ //AND
+    GATEALU = Low16bits(SR1 & SR2OUT);
+  }else if(GetALUK(curInst) == 2){ //XOR
+    GATEALU = Low16bits(SR1 ^ SR2OUT);
+  }else if(GetALUK(curInst) == 3){ //PASSA
+    GATEALU = Low16bits(SR1); 
+  }
+}
+
+int setMARMUXGate(){
+    int* curInst = CURRENT_LATCHES.MICROINSTRUCTION;
+    int IR = CURRENT_LATCHES.IR;
+    if(!GetMARMUX(curInst)){ //ZEXT & LSHF1
+        MARMUXGATE = (IR & 0xFF) << 1; // ZEXT(LSHF(IR[7:0]),1)
+    }else{  //ADDER
+        int ADR1 = GetADDR1MUX(curInst);
+        int ADR1OUT = 0;
+        int ADR2OUT = 0;
+        if(!ADR1){ //PC
+            ADR1OUT = CURRENT_LATCHES.PC;
+        }
+        else{
+            if(GetSR1MUX(curInst)){
+                ADR1OUT = CURRENT_LATCHES.REGS[((CURRENT_LATCHES.IR)>>6) & 0x7];
+            }else{
+                ADR1OUT = CURRENT_LATCHES.REGS[((CURRENT_LATCHES.IR)>>9) & 0x7];
+            }
+        }
+        if(GetADDR2MUX(curInst) == 1){ //offset6, IR[5:0]
+            int sign = CURRENT_LATCHES.IR & 0x20;
+            if(sign){
+                int mask = 65472;
+                ADR2OUT = Low16bits((CURRENT_LATCHES.IR & 0x003F) | mask);
+            }
+            else{
+                ADR2OUT = Low16bits(CURRENT_LATCHES.IR & 0x003F);
+            }
+            
+        }
+        else if(!GetADDR2MUX(curInst)){ //0
+            ADR2OUT = 0;
+        }else if(GetADDR2MUX(curInst) == 2){ //PCOffset9, IR[8:0]
+            int sign = CURRENT_LATCHES.IR & 0x100; 
+            if(sign){
+                int mask = 65280;
+                ADR2OUT = Low16bits(((CURRENT_LATCHES.IR) & 0x01FF) | mask);
+            }
+            else{
+                ADR2OUT = Low16bits((CURRENT_LATCHES.IR) & 0x01FF);
+            }
+        }else if(GetADDR2MUX(curInst) == 3){ //PCOffset11, IR[10:0]
+            int sign = CURRENT_LATCHES.IR & 0x400; 
+            if(sign){
+                int mask = 63488;
+                ADR2OUT = Low16bits(((CURRENT_LATCHES.IR) & 0x07FF) | mask);
+            }
+            else{
+                ADR2OUT = Low16bits((CURRENT_LATCHES.IR) & 0x07FF);
+            }
+        } 
+        if(GetLSHF1(curInst)){
+            ADR2OUT = ADR2OUT << 1;
+        }
+
+        MARMUXGATE = ADR1OUT + ADR2OUT; 
+    }
+}
+
+int setPCGate(){
+    GATEPC = CURRENT_LATCHES.PC;
+}
+
+int setSHFGate(){
+      
+    int* curInst = CURRENT_LATCHES.MICROINSTRUCTION;
+    int SR;
+    if(GetSR1MUX(curInst)){
+        SR = ((CURRENT_LATCHES.IR >> 6) & 0x07);
+    }else{
+        SR = ((CURRENT_LATCHES.IR >> 9) & 0x07);
+    }
+     
+    int IR = CURRENT_LATCHES.IR;
+    int sign = (CURRENT_LATCHES.REGS[SR] & 0x8000);
+    int amt4 = (IR & 0x0F);
+    if(IR & 0x0010){ //Right shift
+        if(IR & 0x0020){ //RSHFA
+            if(sign){
+                int mask = (-1*sign) >> amt4;
+                GATESHF = Low16bits(CURRENT_LATCHES.REGS[SR] >> amt4) | mask;
+            }
+            else{ //ZEXT
+                GATESHF = Low16bits((CURRENT_LATCHES.REGS[SR] >> amt4));
+            }        
+        }
+        else{ //RSHFL
+            GATESHF = Low16bits((CURRENT_LATCHES.REGS[SR] >> amt4));
+        }
+    }
+    else{ //LSHF
+        GATESHF = Low16bits((CURRENT_LATCHES.REGS[SR] << amt4));
+    }
+}
+
+int setMDRGate(){ 
+    int* curInst = CURRENT_LATCHES.MICROINSTRUCTION;
+    int mar0 = CURRENT_LATCHES.MAR & 0x1; //MAR[0]
+    if(GetDATA_SIZE(curInst)){ //WORD
+        GATEMDR = Low16bits(CURRENT_LATCHES.MDR);
+    }else{//BYTE
+        if(CURRENT_LATCHES.MAR & 0x1){
+            GATEMDR = ((CURRENT_LATCHES.MDR & 0xFF00) >> 8);
+            int sign = (GATEMDR & 0x80);
+            if(sign){
+                GATEMDR |= 0xFF00;
+            }
+        }else{
+            GATEMDR = (CURRENT_LATCHES.MDR & 0x00FF);
+            int sign = GATEMDR & 0x80;
+            if(sign){
+                GATEMDR |= 0xFF00;
+            }
+        }
+    }
+}
 
 
 void eval_bus_drivers() {
@@ -617,7 +857,11 @@ void eval_bus_drivers() {
    *		 Gate_SHF,
    *		 Gate_MDR.
    */    
-
+  setALUGate();
+  setMARMUXGate();
+  setPCGate();
+  setSHFGate();
+  setMDRGate();
 }
 
 
@@ -627,7 +871,19 @@ void drive_bus() {
    * Datapath routine for driving the bus from one of the 5 possible 
    * tristate drivers. 
    */       
-
+  if(GetGATE_ALU(CURRENT_LATCHES.MICROINSTRUCTION)){
+    BUS = Low16bits(GATEALU);
+  }else if(GetGATE_MARMUX(CURRENT_LATCHES.MICROINSTRUCTION)){
+    BUS =  Low16bits(MARMUXGATE);
+  }else if(GetGATE_MDR(CURRENT_LATCHES.MICROINSTRUCTION)){
+    BUS = Low16bits(GATEMDR);
+  }else if(GetGATE_SHF(CURRENT_LATCHES.MICROINSTRUCTION)){
+    BUS =  Low16bits(GATESHF);
+  }else if(GetGATE_PC(CURRENT_LATCHES.MICROINSTRUCTION)){
+    BUS = Low16bits(GATEPC);
+  }else{
+    BUS = 0;
+  }
 }
 
 
@@ -639,5 +895,130 @@ void latch_datapath_values() {
    * require sourcing the bus; therefore, this routine has to come 
    * after drive_bus.
    */       
+  int* curInst = CURRENT_LATCHES.MICROINSTRUCTION;     
+  if(GetLD_BEN(curInst)){
+    NEXT_LATCHES.BEN = (((CURRENT_LATCHES.IR) & 0x0800) && CURRENT_LATCHES.N) || (((CURRENT_LATCHES.IR) & 0x0400) && CURRENT_LATCHES.Z) || (((CURRENT_LATCHES.IR) & 0x0200) && CURRENT_LATCHES.P);
+
+  }if(GetLD_CC(curInst)){
+    
+    int cc = Low16bits(BUS);
+    int size = 8*sizeof(int);
+    if(cc<<15){
+        cc = cc << (size-16);
+        cc = cc >> (size-16);
+    }
+    if(cc == 0){
+        NEXT_LATCHES.N = 0;
+        NEXT_LATCHES.Z = 1;
+        NEXT_LATCHES.P = 0;
+    }else if(cc > 0){
+        NEXT_LATCHES.N = 0;
+        NEXT_LATCHES.Z = 0;
+        NEXT_LATCHES.P = 1;
+    }else if(cc < 0){
+        NEXT_LATCHES.N = 1;
+        NEXT_LATCHES.Z = 0;
+        NEXT_LATCHES.P = 0;
+    }
+
+  }if(GetLD_IR(curInst)){
+    NEXT_LATCHES.IR = Low16bits(BUS);
+
+  }if(GetLD_MAR(curInst)){
+    NEXT_LATCHES.MAR = Low16bits(BUS);
+
+  }if(GetLD_MDR(curInst)){
+    int mar = CURRENT_LATCHES.MAR;
+    int mar0 = CURRENT_LATCHES.MAR & 0x1; //MAR[0]
+    int READY = CURRENT_LATCHES.READY;
+    int RW = GetR_W(curInst);
+    int DATASIZE = GetDATA_SIZE(curInst);
+
+    if(GetMIO_EN(curInst)){ 
+         if(READY && !RW){ // IF we're reading
+            NEXT_LATCHES.MDR = Low16bits((((MEMORY[((CURRENT_LATCHES.MAR)) >> 1][1])) << 8) + MEMORY[((CURRENT_LATCHES.MAR)) >> 1 ][0]);
+        }
+
+    }else{
+        if(GetDATA_SIZE(curInst)){
+            NEXT_LATCHES.MDR = Low16bits(BUS);
+        }else{ 
+            if(CURRENT_LATCHES.MAR & 0x1){
+                NEXT_LATCHES.MDR = (BUS & 0x00FF) << 8;
+            }else{
+                NEXT_LATCHES.MDR = (BUS & 0x00FF);
+            }
+        }
+    }
+
+  }
+  if(GetLD_PC(curInst)){
+    if(GetPCMUX(curInst) == 1){
+        NEXT_LATCHES.PC = Low16bits(BUS);
+    }
+    else if(GetPCMUX(curInst) == 0){
+        NEXT_LATCHES.PC = CURRENT_LATCHES.PC + 2;
+    }
+    else if(GetPCMUX(curInst) == 2){
+        int SR1 = 0;
+        int ADR2OUT = 0;
+        if(GetADDR1MUX(curInst)){
+            if(GetSR1MUX(curInst)){
+                SR1 = CURRENT_LATCHES.REGS[((CURRENT_LATCHES.IR)>>6) & 0x07];
+            }else{
+                SR1 = CURRENT_LATCHES.REGS[((CURRENT_LATCHES.IR)>>9) & 0x07];
+            }
+        }else{
+            SR1 = CURRENT_LATCHES.PC;
+        }
+        if(GetADDR2MUX(curInst) == 1){ //offset6, IR[5:0]
+            int sign = CURRENT_LATCHES.IR & 0x20;
+            if(sign){
+                int mask = 65472;
+                ADR2OUT = Low16bits((CURRENT_LATCHES.IR & 0x003F) | mask);
+            }
+            else{
+                ADR2OUT = Low16bits(CURRENT_LATCHES.IR & 0x003F);
+            }
+            
+        }
+        else if(GetADDR2MUX(curInst) == 0){ //0
+            ADR2OUT = 0;
+        }else if(GetADDR2MUX(curInst) == 2){ //PCOffset9, IR[8:0]
+            int sign = CURRENT_LATCHES.IR & 0x100; 
+            if(sign){
+                int mask = 65280;
+                ADR2OUT = Low16bits(((CURRENT_LATCHES.IR) & 0x01FF) | mask);
+            }
+            else{
+                ADR2OUT = Low16bits((CURRENT_LATCHES.IR) & 0x01FF);
+            }
+        }else if(GetADDR2MUX(curInst) == 3){ //PCOffset11, IR[10:0]
+            int sign = CURRENT_LATCHES.IR & 0x400; 
+            if(sign){
+                int mask = 63488;
+                ADR2OUT = Low16bits(((CURRENT_LATCHES.IR) & 0x07FF) | mask);
+            }
+            else{
+                ADR2OUT = Low16bits((CURRENT_LATCHES.IR) & 0x07FF);
+            }
+        } 
+        if(GetLSHF1(curInst)){
+            ADR2OUT = ADR2OUT << 1;
+        }        
+        NEXT_LATCHES.PC = SR1 + ADR2OUT;
+    }
+
+  }
+
+
+  if(GetLD_REG(curInst)){
+    if(GetDRMUX(curInst)){
+        NEXT_LATCHES.REGS[7] = Low16bits(BUS);
+    }else{
+        NEXT_LATCHES.REGS[((CURRENT_LATCHES.IR) >> 9) & 0x7] = Low16bits(BUS); 
+    }
+  }
+
 
 }
