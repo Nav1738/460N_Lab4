@@ -1,0 +1,45 @@
+.ORIG x3000
+
+LEA R0, START
+LDW R1, R0, #0
+AND R2, R2, #0
+ADD R2, R2, #1
+STW R2, R1, #0
+
+LEA R2, ADDBEGIN
+LDW R2, R2, #0 ; R2 = addr in memory 
+
+AND R3, R3, #0; R3 will have the sum 
+
+AND R4,R4, #0; R4 <- counter 
+ADD R4, R4, #20
+
+LOOP LDB R5, R2, #0
+     ADD R3, R3, R5
+     ADD R2, R2, #1
+     ADD R4, R4, #-1
+     BRNP LOOP 
+     
+LEA R2, STORESUM
+LDW R2, R2, #0 
+STW R3, R2, #0
+
+LEA R2, PROTEXC
+LDW R2, R2, #0
+STW R3, R2, #0
+
+;LEA R2, UNALIGNED
+;LDW R2, R2, #0
+;STW R3, R2, #0
+
+;UNKNOWNOP .FILL xA000
+
+
+TRAP x25 
+
+START .FILL x4000
+ADDBEGIN .FILL xC000
+STORESUM .FILL xC014
+PROTEXC .FILL x0000
+UNALIGNED .FILL xC017
+.END
