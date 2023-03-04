@@ -204,6 +204,7 @@ int SSP; /* Initial value of system stack pointer */
 int PSR;
 int INT;
 int EXC;
+int SP; //For user stack
 } System_Latches;
 
 /* Data Structure for Latch */
@@ -714,8 +715,10 @@ int GATEPC = 0;
 int GATEALU = 0;
 int GATESHF = 0;
 int GATEMDR = 0;
-int GATEPC2 = 0;
-
+int GATESP = 0;
+int GATEPSR = 0; 
+int GATEPC1 = 0;
+int GATEVECTOR = 0;
 
 int setALUGate(){
   int SR2OUT;
@@ -867,6 +870,13 @@ int setMDRGate(){
     }
 }
 
+int setGATESP(){}
+
+int setGATEPSR(){}
+
+int setGATEPC1(){}
+
+int setGATEVECTOR(){}
 
 void eval_bus_drivers() {
 
@@ -884,6 +894,10 @@ void eval_bus_drivers() {
   setPCGate();
   setSHFGate();
   setMDRGate();
+  setGATESP();
+  setGATEPSR();
+  setGATEPC1();
+  setGATEVECTOR();
 }
 
 
@@ -892,18 +906,31 @@ void drive_bus() {
   /* 
    * Datapath routine for driving the bus from one of the 5 possible 
    * tristate drivers. 
-   */       
-  if(GetGATE_ALU(CURRENT_LATCHES.MICROINSTRUCTION)){
+   */ 
+
+  int* curInst = CURRENT_LATCHES.MICROINSTRUCTION;
+
+  if(GetGATE_ALU(curInst)){
     BUS = Low16bits(GATEALU);
-  }else if(GetGATE_MARMUX(CURRENT_LATCHES.MICROINSTRUCTION)){
+  }else if(GetGATE_MARMUX(curInst)){
     BUS =  Low16bits(MARMUXGATE);
-  }else if(GetGATE_MDR(CURRENT_LATCHES.MICROINSTRUCTION)){
+  }else if(GetGATE_MDR(curInst)){
     BUS = Low16bits(GATEMDR);
-  }else if(GetGATE_SHF(CURRENT_LATCHES.MICROINSTRUCTION)){
+  }else if(GetGATE_SHF(curInst)){
     BUS =  Low16bits(GATESHF);
-  }else if(GetGATE_PC(CURRENT_LATCHES.MICROINSTRUCTION)){
+  }else if(GetGATE_PC(curInst)){
     BUS = Low16bits(GATEPC);
-  }else{
+  }else if(GetGATE_SP(curInst)){
+    BUS = Low16bits(GATESP);
+  }else if(GetGATE_PSR(curInst)){
+    BUS = Low16bits(GATEPSR);
+  }else if(GetGATE_PC1(curInst)){
+    BUS = Low16bits(GATEPC1);
+  }else if(GetGATE_VECTOR(curInst)){
+    BUS = Low16bits(GATEVECTOR);
+  }
+  
+  else{
     BUS = 0;
   }
 }
@@ -1032,8 +1059,6 @@ void latch_datapath_values() {
     }
 
   }
-
-
   if(GetLD_REG(curInst)){
     if(GetDRMUX(curInst)){
         NEXT_LATCHES.REGS[7] = Low16bits(BUS);
