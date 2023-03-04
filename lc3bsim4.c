@@ -77,19 +77,22 @@ enum CS_BITS {
     LSHF1,
 /* MODIFY: you have to add all your new control signals */
     LD_SAVEDUSP,
-    LD_SAVEDSP,
+    LD_SAVEDSSP,
     SPMUX,
     GATE_SP,
     GATE_PSR,
+    GATE_PC1,
     PSRMUX,
     LD_VECTOR,
     GATE_VECTOR,
     VECTORMUX,
     LD_PRIV,
+    LD_PRIORITY,
     LD_EXC,
-    TABLE_MUX,
+    TABLEMUX,
     COND2,
-    CONTROL_STORE_BITS
+    SET_PRIV,
+    CONTROL_STORE_BITS,
 } CS_BITS;
 
 /***************************************************************/
@@ -124,6 +127,23 @@ int GetR_W(int *x)           { return(x[R_W]); }
 int GetDATA_SIZE(int *x)     { return(x[DATA_SIZE]); } 
 int GetLSHF1(int *x)         { return(x[LSHF1]); }
 /* MODIFY: you can add more Get functions for your new control signals */
+int GetSavedUSP(int *x)      { return(x[LD_SAVEDUSP]); }
+int GetSavedSSP(int *x)      { return(x[LD_SAVEDSSP]); }
+int GetSPMUX(int *x)         { return (x[SPMUX]); }
+int GetGATE_SP(int *x)       { return (x[GATE_SP]); }
+int GetGATE_PSR(int *x)      { return (x[GATE_PSR]); }
+int GetGATE_PC1(int *x)      { return (x[GATE_PC1]); }
+int GetPSRMUX(int *x)        { return (x[PSRMUX]); }
+int GetLD_VECTOR(int *x)     { return (x[LD_VECTOR]); }
+int GetGATE_VECTOR(int *x)   { return (x[GATE_VECTOR]); }
+int GetVECTORMUX(int *x)     { return (x[VECTORMUX]); }
+int GetLD_PRIV(int *x)       { return (x[LD_PRIV]); }
+int GetLD_PRIORITY(int *x)   { return (x[LD_PRIORITY]); }
+int GetLD_EXC(int *x)        { return (x[LD_EXC]); }
+int GetLD_TABLEMUX(int *x)   { return (x[TABLEMUX]); }
+int GetCOND2(int *x)         { return (x[COND2]); }
+int GetSET_PRIV(int *x)      { return (x[SET_PRIV]); }
+
 
 /***************************************************************/
 /* The control store rom.                                      */
@@ -694,6 +714,8 @@ int GATEPC = 0;
 int GATEALU = 0;
 int GATESHF = 0;
 int GATEMDR = 0;
+int GATEPC2 = 0;
+
 
 int setALUGate(){
   int SR2OUT;
