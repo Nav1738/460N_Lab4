@@ -75,8 +75,8 @@ enum CS_BITS {
     GATE_PC1,
     GATE_VECTOR,
     PCMUX1, PCMUX0,
-    DRMUX,
-    SR1MUX,
+    DRMUX1, DRMUX2,
+    SR1MUX1, SR2MUX2,
     ADDR1MUX,
     ADDR2MUX1, ADDR2MUX0,
     MARMUX,
@@ -115,8 +115,8 @@ int GetGATE_ALU(int *x)      { return(x[GATE_ALU]); }
 int GetGATE_MARMUX(int *x)   { return(x[GATE_MARMUX]); }
 int GetGATE_SHF(int *x)      { return(x[GATE_SHF]); }
 int GetPCMUX(int *x)         { return((x[PCMUX1] << 1) + x[PCMUX0]); }
-int GetDRMUX(int *x)         { return(x[DRMUX]); }
-int GetSR1MUX(int *x)        { return(x[SR1MUX]); }
+int GetDRMUX(int *x)         { return((x[DRMUX1]<<1)+(x[DRMUX2])); }
+int GetSR1MUX(int *x)        { return((x[SR1MUX1]<<1)+(x[SR2MUX2])); }
 int GetADDR1MUX(int *x)      { return(x[ADDR1MUX]); }
 int GetADDR2MUX(int *x)      { return((x[ADDR2MUX1] << 1) + x[ADDR2MUX0]); }
 int GetMARMUX(int *x)        { return(x[MARMUX]); }
@@ -248,6 +248,10 @@ void cycle() {
   CURRENT_LATCHES = NEXT_LATCHES;
 
   CYCLE_COUNT++;
+
+  if(CYCLE_COUNT == 300){
+    NEXT_LATCHES.INT = 1;
+  }
 }
 
 /***************************************************************/
@@ -343,6 +347,10 @@ void rdump(FILE * dumpsim_file) {
     printf("MDR          : 0x%0.4x\n", CURRENT_LATCHES.MDR);
     printf("MAR          : 0x%0.4x\n", CURRENT_LATCHES.MAR);
     printf("CCs: N = %d  Z = %d  P = %d\n", CURRENT_LATCHES.N, CURRENT_LATCHES.Z, CURRENT_LATCHES.P);
+
+    printf("INTERRUPT    : %d\n", CURRENT_LATCHES.INT);
+    printf("EXC          : %d\n", CURRENT_LATCHES.EXC);
+
     printf("Registers:\n");
     for (k = 0; k < LC_3b_REGS; k++)
 	printf("%d: 0x%0.4x\n", k, CURRENT_LATCHES.REGS[k]);
@@ -628,7 +636,9 @@ void eval_micro_sequencer() {
    */
   int* curInst = CURRENT_LATCHES.MICROINSTRUCTION;
   int nextStateNum = GetJ(curInst);
-  
+    if(GetResetEXC(curInst)){
+        NEXT_LATCHES.EXC = 0;
+    }
     if(((CURRENT_LATCHES.IR >> 13) & 0xF) == 5){
         nextStateNum = 50;
     }
@@ -636,7 +646,6 @@ void eval_micro_sequencer() {
     
         if(CURRENT_LATCHES.MICROINSTRUCTION[IRD]){
             nextStateNum = ((CURRENT_LATCHES.IR >> 12)) & 0xF; // Get IR[15:12] to find which state to branch to
-        
         }
         else{
             if(CURRENT_LATCHES.EXC){
@@ -672,10 +681,10 @@ void eval_micro_sequencer() {
     }
   }
   NEXT_LATCHES.STATE_NUMBER = nextStateNum;
+  printf("%d\n", nextStateNum);
   for(int i = 0; i < CONTROL_STORE_BITS; i++){ //35 bits in a microinstruction
     NEXT_LATCHES.MICROINSTRUCTION[i] = CONTROL_STORE[NEXT_LATCHES.STATE_NUMBER][i]; //populate the microinstruction for the next cycle
   }  
-
 }
 
 int numCycle = 0;
@@ -793,6 +802,7 @@ int setMARMUXGate(){
             if(sign){
                 int mask = 65472;
                 ADR2OUT = Low16bits((CURRENT_LATCHES.IR & 0x003F) | mask);
+                ADR2OUT *= -1;
             }
             else{
                 ADR2OUT = Low16bits(CURRENT_LATCHES.IR & 0x003F);
@@ -804,8 +814,9 @@ int setMARMUXGate(){
         }else if(GetADDR2MUX(curInst) == 2){ //PCOffset9, IR[8:0]
             int sign = CURRENT_LATCHES.IR & 0x100; 
             if(sign){
-                int mask = 65280;
+                int mask = 65024;
                 ADR2OUT = Low16bits(((CURRENT_LATCHES.IR) & 0x01FF) | mask);
+                ADR2OUT *= -1;
             }
             else{
                 ADR2OUT = Low16bits((CURRENT_LATCHES.IR) & 0x01FF);
@@ -815,6 +826,7 @@ int setMARMUXGate(){
             if(sign){
                 int mask = 63488;
                 ADR2OUT = Low16bits(((CURRENT_LATCHES.IR) & 0x07FF) | mask);
+                ADR2OUT *= -1;
             }
             else{
                 ADR2OUT = Low16bits((CURRENT_LATCHES.IR) & 0x07FF);
@@ -909,7 +921,7 @@ int setGATEPC1(){
 }
 
 int setGATEVECTOR(){
-    GATEVECTOR = (0x02 << 8) + (CURRENT_LATCHES.VECTOR & 0xFF);
+    GATEVECTOR = (0x02 << 8) + ((CURRENT_LATCHES.VECTOR & 0xFF) << 1);
 }
 
 void eval_bus_drivers() {
@@ -963,7 +975,6 @@ void drive_bus() {
   }else if(GetGATE_VECTOR(curInst)){
     BUS = Low16bits(GATEVECTOR);
   }
-  
   else{
     BUS = 0;
   }
@@ -1061,6 +1072,7 @@ void latch_datapath_values() {
             if(sign){
                 int mask = 65472;
                 ADR2OUT = Low16bits((CURRENT_LATCHES.IR & 0x003F) | mask);
+                ADR2OUT *= -1;
             }
             else{
                 ADR2OUT = Low16bits(CURRENT_LATCHES.IR & 0x003F);
@@ -1072,8 +1084,9 @@ void latch_datapath_values() {
         }else if(GetADDR2MUX(curInst) == 2){ //PCOffset9, IR[8:0]
             int sign = CURRENT_LATCHES.IR & 0x100; 
             if(sign){
-                int mask = 65280;
+                int mask = 65024;
                 ADR2OUT = Low16bits(((CURRENT_LATCHES.IR) & 0x01FF) | mask);
+                ADR2OUT *= -1;
             }
             else{
                 ADR2OUT = Low16bits((CURRENT_LATCHES.IR) & 0x01FF);
@@ -1083,15 +1096,21 @@ void latch_datapath_values() {
             if(sign){
                 int mask = 63488;
                 ADR2OUT = Low16bits(((CURRENT_LATCHES.IR) & 0x07FF) | mask);
+                ADR2OUT *= -1;
             }
             else{
                 ADR2OUT = Low16bits((CURRENT_LATCHES.IR) & 0x07FF);
             }
+            
         } 
+        
         if(GetLSHF1(curInst)){
-            ADR2OUT = ADR2OUT << 1;
-        }        
+            ADR2OUT = (ADR2OUT << 1) & 0xFFFF;
+        }      
+        printf("ADR2OUT = %x\n", ADR2OUT);
         NEXT_LATCHES.PC = SR1 + ADR2OUT;
+        printf("NEXT_LATCHES.PC = %x\n", NEXT_LATCHES.PC);
+        
     }
 
   }
@@ -1106,16 +1125,20 @@ void latch_datapath_values() {
     }
   }
   if(GetLD_EXC(curInst)){
-    if((CURRENT_LATCHES.PSR == 1)  && (BUS < 0x2FFF || BUS >= 0x0000)){//Protection
+    if((CURRENT_LATCHES.PSR == 1) && (BUS < 0x2FFF && BUS >= 0x0000) && CURRENT_LATCHES.STATE_NUMBER != 18 && CURRENT_LATCHES.STATE_NUMBER != 19){//Protection
         NEXT_LATCHES.EXC = 1;
+        printf("PROT\n");
     }else if(GetJ(curInst) == 10 || GetJ(curInst) == 11){ //Unknownop
         NEXT_LATCHES.EXC = 1;
+        printf("UNKNOWNOP\n");
     }else if(((BUS & 0x1) == 1) && (CURRENT_LATCHES.STATE_NUMBER == 6 || CURRENT_LATCHES.STATE_NUMBER == 7)){//Unaligned
         NEXT_LATCHES.EXC = 1;
+        printf("UNALIGNED\n");
     }
 
     if(GetResetEXC(curInst)){
         NEXT_LATCHES.EXC = 0;
+        printf("RESET\n");
     }
 
   }
@@ -1126,7 +1149,7 @@ void latch_datapath_values() {
         NEXT_LATCHES.PSR = GetSET_PRIV(curInst);
     }
   }if(GetLD_VECTOR(curInst)){
-    if((CURRENT_LATCHES.PSR == 1)  && (BUS < 0x2FFF || BUS >= 0x0000)){//Prot
+    if((CURRENT_LATCHES.PSR == 1) && (BUS < 0x2FFF && BUS >= 0x0000) && CURRENT_LATCHES.STATE_NUMBER != 18 && CURRENT_LATCHES.STATE_NUMBER != 19){//Prot
         NEXT_LATCHES.VECTOR = 0x02;
     }else{
         if(((CURRENT_LATCHES.MAR & 0x1) == 1) && (CURRENT_LATCHES.STATE_NUMBER == 6 || CURRENT_LATCHES.STATE_NUMBER == 7)){//unaligned

@@ -12,15 +12,16 @@ LDW R2, R2, #0 ; R2 = addr in memory
 AND R3, R3, #0; R3 will have the sum 
 
 AND R4,R4, #0; R4 <- counter 
-ADD R4, R4, #20
+ADD R4, R4, #10
+ADD R4, R4, #10
 
 LOOP LDB R5, R2, #0
-     ADD R3, R3, R5
-     ADD R2, R2, #1
-     ADD R4, R4, #-1
-     BRNP LOOP 
+     ADD R3, R3, R5 ;3018
+     ADD R2, R2, #1 ; 301a
+     ADD R4, R4, #-1 ; 301c
+     BRNP LOOP  ; 301e
      
-LEA R2, STORESUM
+LEA R2, STORESUM ;3020
 LDW R2, R2, #0 
 STW R3, R2, #0
 
