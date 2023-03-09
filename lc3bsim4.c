@@ -640,6 +640,7 @@ void eval_micro_sequencer() {
     }
     if(((CURRENT_LATCHES.IR >> 13) & 0xF) == 5){
         nextStateNum = 50;
+        NEXT_LATCHES.IR = Low16bits(BUS);
     }
     else{ // evaluate microsequencer gates
     
@@ -965,7 +966,6 @@ void drive_bus() {
     BUS =  Low16bits(MARMUXGATE);
   }else if(GetGATE_MDR(curInst)){
     BUS = Low16bits(GATEMDR);
-    printf("MDR: %x\n", BUS);
   }else if(GetGATE_SHF(curInst)){
     BUS =  Low16bits(GATESHF);
   }else if(GetGATE_PC(curInst)){
@@ -1140,6 +1140,8 @@ void latch_datapath_values() {
     }
   }
   if(GetLD_EXC(curInst)){
+    printf("LOAD EXC\n");
+    printf("LD_EXC BUS: %x\n", BUS);
     if((CURRENT_LATCHES.PSR == 1) && (BUS < 0x2FFF && BUS >= 0x0000) && CURRENT_LATCHES.STATE_NUMBER != 18 && CURRENT_LATCHES.STATE_NUMBER != 19){//Protection
         NEXT_LATCHES.EXC = 1;
         printf("PROT\n");
@@ -1169,6 +1171,7 @@ void latch_datapath_values() {
         printf("CURRENT_LATCHES.PSR: %d\n",CURRENT_LATCHES.PSR);
     }
   }if(GetLD_VECTOR(curInst)){
+    printf("LOAD VECTOR\n");
     if((CURRENT_LATCHES.PSR == 1) && (BUS < 0x2FFF && BUS >= 0x0000) && CURRENT_LATCHES.STATE_NUMBER != 18 && CURRENT_LATCHES.STATE_NUMBER != 19){//Prot
         NEXT_LATCHES.VECTOR = 0x02;
     }else{
@@ -1186,8 +1189,8 @@ void latch_datapath_values() {
             }
         }
         //NEXT_LATCHES.VECTOR = NEXT_LATCHES.VECTOR << 1;
-        printf("NEXT_LATCHES.VECTOR: %d\n",NEXT_LATCHES.VECTOR);
     }
+    printf("NEXT_LATCHES.VECTOR: %d\n",NEXT_LATCHES.VECTOR);
   }if(GetSavedSSP(curInst)){
     NEXT_LATCHES.SSP = CURRENT_LATCHES.REGS[6];
     printf("NEXT_LATCHES.SSP: %d\n",NEXT_LATCHES.SSP);
